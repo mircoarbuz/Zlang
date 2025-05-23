@@ -6,7 +6,10 @@
 #include <unordered_map>
 #include <map>
 #include <sstream>
+#include <fstream>   // || For file loading
+#include <filesystem> // || For directory handling (C++17+)
 
+// || Trim whitespace from start and end of string
 std::string trim(const std::string& s) {
     size_t start = 0;
     while (start < s.size() && std::isspace(s[start])) ++start;
@@ -15,9 +18,13 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start);
 }
 
+// || Global variable store: variable name -> value
 std::unordered_map<std::string, std::string> variables;
+
+// || Function definitions store: function name -> function body
 std::map<std::string, std::string> functions;
 
+// || Replace all variable names with their current values inside an expression
 std::string resolveVariables(const std::string& expr) {
     std::string resolved = expr;
     for (const auto& [key, val] : variables) {
@@ -29,6 +36,7 @@ std::string resolveVariables(const std::string& expr) {
     return resolved;
 }
 
+// || Evaluate simple boolean conditions: supports ==, !=, >, < and literal true/false
 bool evalCondition(const std::string& cond) {
     std::string c = resolveVariables(trim(cond));
     std::transform(c.begin(), c.end(), c.begin(), ::tolower);
@@ -62,6 +70,7 @@ bool evalCondition(const std::string& cond) {
     return false;
 }
 
+// || Parse comma-separated list items, supports quoted strings and trimming
 std::vector<std::string> parseList(const std::string& s) {
     std::vector<std::string> items;
     size_t pos = 0;
@@ -89,10 +98,11 @@ std::vector<std::string> parseList(const std::string& s) {
     return items;
 }
 
+// || Run a single Zlang command line
 void runCommand(const std::string& line) {
     std::string trimmed = trim(line);
 
-    // >> Function call
+    // || Function call: name();
     if (trimmed.find("();") != std::string::npos) {
         std::string fname = trimmed.substr(0, trimmed.find("();"));
         if (functions.find(fname) != functions.end()) {
@@ -103,7 +113,7 @@ void runCommand(const std::string& line) {
         return;
     }
 
-    // >> Variable declaration
+    // || Variable declaration: var x = value;
     if (trimmed.rfind("var ", 0) == 0) {
         size_t eq = trimmed.find('=');
         if (eq != std::string::npos) {
@@ -116,7 +126,7 @@ void runCommand(const std::string& line) {
         return;
     }
 
-    // >> io.out(...)
+    // || io.out(...) command for output
     if (trimmed.rfind("io.out(", 0) == 0 && trimmed.back() == ';') {
         size_t start = trimmed.find('(');
         size_t end = trimmed.rfind(')');
@@ -133,6 +143,7 @@ void runCommand(const std::string& line) {
             return;
         }
 
+        // || Output list elements if content is [ ... ]
         if (content.front() == '[' && content.back() == ']') {
             auto items = parseList(content.substr(1, content.size() - 2));
             for (size_t i = 0; i < items.size(); ++i) {
@@ -143,11 +154,13 @@ void runCommand(const std::string& line) {
             return;
         }
 
+        // || Output quoted strings without quotes
         if (content.front() == '"' && content.back() == '"') {
             std::cout << content.substr(1, content.size() - 2) << std::endl;
             return;
         }
 
+        // || Output numbers
         try {
             size_t pos;
             double num = std::stod(content, &pos);
@@ -165,7 +178,7 @@ void runCommand(const std::string& line) {
 }
 
 int main() {
-    std::cout << "Zlang shell\n";
+    std::cout << "Zlang shell (type q or quit to exit)\n";
 
     std::string line;
     while (true) {
@@ -175,7 +188,36 @@ int main() {
 
         if (input == "q" || input == "quit") break;
 
-        // >> func definition
+        // || Load a .zl script file: load filename.zl
+        if (input.rfind("load ", 0) == 0) {
+            std::string filename = trim(input.substr(5));
+
+            // || Append .zl extension if missing
+            if (filename.size() < 3 || filename.substr(filename.size() - 3) != ".zl") {
+                filename += ".zl";
+            }
+
+            // || Check if file exists before opening
+            if (!std::filesystem::exists(filename)) {
+                std::cout << "File not found: " << filename << std::endl;
+                continue;
+            }
+
+            std::ifstream file(filename);
+            if (!file) {
+                std::cout << "Could not open file: " << filename << std::endl;
+                continue;
+            }
+            std::string fileLine;
+            while (std::getline(file, fileLine)) {
+                fileLine = trim(fileLine);
+                if (!fileLine.empty()) runCommand(fileLine);
+            }
+            file.close();
+            continue;
+        }
+
+        // || Function definition: func name() { ... }
         if (input.rfind("func ", 0) == 0) {
             size_t nameStart = 5;
             size_t paren = input.find("()", nameStart);
@@ -192,7 +234,7 @@ int main() {
             continue;
         }
 
-        // >> if statement
+        // || Inline if statement: if cond { ... }
         if (input.rfind("if ", 0) == 0) {
             size_t open = input.find('{');
             size_t close = input.find('}');
@@ -207,32 +249,31 @@ int main() {
             }
         }
 
-        // >> loop statement
+        // || Loop statement: loop N { ... }
         if (input.rfind("loop ", 0) == 0) {
+            size_t space = input.find(' ', 5);
             size_t open = input.find('{');
             size_t close = input.find('}');
-            if (open != std::string::npos && close != std::string::npos && close > open) {
+            if (space != std::string::npos && open != std::string::npos && close != std::string::npos && close > open) {
                 std::string countStr = trim(input.substr(5, open - 5));
                 std::string block = trim(input.substr(open + 1, close - open - 1));
-
                 int count = 0;
                 try {
                     count = std::stoi(resolveVariables(countStr));
                 } catch (...) {
-                    std::cout << "Syntax error: invalid loop count\n";
+                    std::cout << "Invalid loop count\n";
                     continue;
                 }
-
                 for (int i = 0; i < count; ++i) {
                     runCommand(block);
                 }
-                continue;
             } else {
-                std::cout << "Syntax error: loop statement must use { ... }\n";
-                continue;
+                std::cout << "Syntax error: loop must be like 'loop N { ... }'\n";
             }
+            continue;
         }
 
+        // || Otherwise, run as a command
         runCommand(input);
     }
 
