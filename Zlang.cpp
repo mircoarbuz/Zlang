@@ -3,8 +3,10 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
+#include <map>
+#include <sstream>
 
-// Trim whitespace from start and end
 std::string trim(const std::string& s) {
     size_t start = 0;
     while (start < s.size() && std::isspace(s[start])) ++start;
@@ -13,15 +15,27 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start);
 }
 
-// Evaluate condition (support true, false, and simple integer comparisons)
+std::unordered_map<std::string, std::string> variables;
+std::map<std::string, std::string> functions;
+
+std::string resolveVariables(const std::string& expr) {
+    std::string resolved = expr;
+    for (const auto& [key, val] : variables) {
+        size_t pos;
+        while ((pos = resolved.find(key)) != std::string::npos) {
+            resolved.replace(pos, key.length(), val);
+        }
+    }
+    return resolved;
+}
+
 bool evalCondition(const std::string& cond) {
-    std::string c = trim(cond);
+    std::string c = resolveVariables(trim(cond));
     std::transform(c.begin(), c.end(), c.begin(), ::tolower);
 
     if (c == "true") return true;
     if (c == "false") return false;
 
-    // Support simple integer comparisons: >, <, ==, !=
     size_t pos;
 
     if ((pos = c.find("==")) != std::string::npos) {
@@ -45,30 +59,27 @@ bool evalCondition(const std::string& cond) {
         return lhs < rhs;
     }
 
-    return false; // fallback
+    return false;
 }
 
-// Parse comma-separated list items inside brackets (supports quoted strings or numbers)
 std::vector<std::string> parseList(const std::string& s) {
     std::vector<std::string> items;
     size_t pos = 0;
 
     while (pos < s.size()) {
         while (pos < s.size() && std::isspace(s[pos])) pos++;
-
         if (pos >= s.size()) break;
 
         if (s[pos] == '"') {
-            size_t start_quote = pos + 1;
-            size_t end_quote = s.find('"', start_quote);
-            if (end_quote == std::string::npos) break;
-            items.push_back(s.substr(start_quote, end_quote - start_quote));
-            pos = end_quote + 1;
+            size_t start = ++pos;
+            size_t end = s.find('"', start);
+            if (end == std::string::npos) break;
+            items.push_back(s.substr(start, end - start));
+            pos = end + 1;
         } else {
-            size_t start_token = pos;
+            size_t start = pos;
             while (pos < s.size() && s[pos] != ',' && s[pos] != ']') pos++;
-            std::string token = trim(s.substr(start_token, pos - start_token));
-            if (!token.empty()) items.push_back(token);
+            items.push_back(trim(s.substr(start, pos - start)));
         }
 
         while (pos < s.size() && std::isspace(s[pos])) pos++;
@@ -81,22 +92,47 @@ std::vector<std::string> parseList(const std::string& s) {
 void runCommand(const std::string& line) {
     std::string trimmed = trim(line);
 
+    // >> Function call
+    if (trimmed.find("();") != std::string::npos) {
+        std::string fname = trimmed.substr(0, trimmed.find("();"));
+        if (functions.find(fname) != functions.end()) {
+            runCommand(functions[fname]);
+        } else {
+            std::cout << "Unknown function: " << fname << std::endl;
+        }
+        return;
+    }
+
+    // >> Variable declaration
+    if (trimmed.rfind("var ", 0) == 0) {
+        size_t eq = trimmed.find('=');
+        if (eq != std::string::npos) {
+            std::string name = trim(trimmed.substr(4, eq - 4));
+            std::string value = trim(trimmed.substr(eq + 1));
+            variables[name] = value;
+        } else {
+            std::cout << "Syntax error in variable declaration\n";
+        }
+        return;
+    }
+
+    // >> io.out(...)
     if (trimmed.rfind("io.out(", 0) == 0 && trimmed.back() == ';') {
-        size_t start_paren = trimmed.find('(');
-        size_t end_paren = trimmed.rfind(')');
-        if (start_paren == std::string::npos || end_paren == std::string::npos || end_paren <= start_paren) {
+        size_t start = trimmed.find('(');
+        size_t end = trimmed.rfind(')');
+        if (start == std::string::npos || end == std::string::npos || end <= start) {
             std::cout << "Syntax error in io.out()\n";
             return;
         }
 
-        std::string content = trim(trimmed.substr(start_paren + 1, end_paren - start_paren - 1));
+        std::string content = trim(trimmed.substr(start + 1, end - start - 1));
+        content = resolveVariables(content);
 
         if (content.empty()) {
             std::cout << std::endl;
             return;
         }
 
-        // List case: [ ... ]
         if (content.front() == '[' && content.back() == ']') {
             auto items = parseList(content.substr(1, content.size() - 2));
             for (size_t i = 0; i < items.size(); ++i) {
@@ -107,29 +143,25 @@ void runCommand(const std::string& line) {
             return;
         }
 
-        // Quoted string case
         if (content.front() == '"' && content.back() == '"') {
-            std::string message = content.substr(1, content.size() - 2);
-            std::cout << message << std::endl;
+            std::cout << content.substr(1, content.size() - 2) << std::endl;
             return;
         }
 
-        // Number case (int or float)
         try {
-            size_t pos = 0;
+            size_t pos;
             double num = std::stod(content, &pos);
             if (pos == content.size()) {
                 std::cout << num << std::endl;
                 return;
             }
-        } catch (...) {
-            // Not a number, fall through
-        }
+        } catch (...) {}
 
-        std::cout << "Syntax error in io.out()" << std::endl;
-    } else {
-        std::cout << "Unknown command: " << trimmed << std::endl;
+        std::cout << "Syntax error in io.out()\n";
+        return;
     }
+
+    std::cout << "Unknown command: " << trimmed << std::endl;
 }
 
 int main() {
@@ -143,21 +175,60 @@ int main() {
 
         if (input == "q" || input == "quit") break;
 
-        // Inline if support (only one-line if {...})
+        // >> func definition
+        if (input.rfind("func ", 0) == 0) {
+            size_t nameStart = 5;
+            size_t paren = input.find("()", nameStart);
+            size_t blockStart = input.find('{');
+            size_t blockEnd = input.find('}');
+
+            if (paren != std::string::npos && blockStart != std::string::npos && blockEnd != std::string::npos) {
+                std::string fname = trim(input.substr(nameStart, paren - nameStart));
+                std::string body = trim(input.substr(blockStart + 1, blockEnd - blockStart - 1));
+                functions[fname] = body;
+            } else {
+                std::cout << "Syntax error in func definition\n";
+            }
+            continue;
+        }
+
+        // >> if statement
         if (input.rfind("if ", 0) == 0) {
-            size_t brace_open = input.find('{');
-            size_t brace_close = input.find('}');
+            size_t open = input.find('{');
+            size_t close = input.find('}');
+            if (open != std::string::npos && close != std::string::npos && close > open) {
+                std::string cond = trim(input.substr(3, open - 3));
+                std::string block = trim(input.substr(open + 1, close - open - 1));
+                if (evalCondition(cond)) runCommand(block);
+                continue;
+            } else {
+                std::cout << "Syntax error: if statement must use { ... }\n";
+                continue;
+            }
+        }
 
-            if (brace_open != std::string::npos && brace_close != std::string::npos && brace_close > brace_open) {
-                std::string cond = trim(input.substr(3, brace_open - 3));
-                std::string block = trim(input.substr(brace_open + 1, brace_close - brace_open - 1));
+        // >> loop statement
+        if (input.rfind("loop ", 0) == 0) {
+            size_t open = input.find('{');
+            size_t close = input.find('}');
+            if (open != std::string::npos && close != std::string::npos && close > open) {
+                std::string countStr = trim(input.substr(5, open - 5));
+                std::string block = trim(input.substr(open + 1, close - open - 1));
 
-                if (evalCondition(cond)) {
+                int count = 0;
+                try {
+                    count = std::stoi(resolveVariables(countStr));
+                } catch (...) {
+                    std::cout << "Syntax error: invalid loop count\n";
+                    continue;
+                }
+
+                for (int i = 0; i < count; ++i) {
                     runCommand(block);
                 }
                 continue;
             } else {
-                std::cout << "Syntax error: if statement must have { ... } block on same line\n";
+                std::cout << "Syntax error: loop statement must use { ... }\n";
                 continue;
             }
         }
