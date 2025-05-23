@@ -13,11 +13,39 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start);
 }
 
-// Evaluate condition: true only if "true" (case-insensitive)
+// Evaluate condition (support true, false, and simple integer comparisons)
 bool evalCondition(const std::string& cond) {
-    std::string lower = cond;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-    return (lower == "true");
+    std::string c = trim(cond);
+    std::transform(c.begin(), c.end(), c.begin(), ::tolower);
+
+    if (c == "true") return true;
+    if (c == "false") return false;
+
+    // Support simple integer comparisons: >, <, ==, !=
+    size_t pos;
+
+    if ((pos = c.find("==")) != std::string::npos) {
+        int lhs = std::stoi(trim(c.substr(0, pos)));
+        int rhs = std::stoi(trim(c.substr(pos + 2)));
+        return lhs == rhs;
+    }
+    if ((pos = c.find("!=")) != std::string::npos) {
+        int lhs = std::stoi(trim(c.substr(0, pos)));
+        int rhs = std::stoi(trim(c.substr(pos + 2)));
+        return lhs != rhs;
+    }
+    if ((pos = c.find(">")) != std::string::npos) {
+        int lhs = std::stoi(trim(c.substr(0, pos)));
+        int rhs = std::stoi(trim(c.substr(pos + 1)));
+        return lhs > rhs;
+    }
+    if ((pos = c.find("<")) != std::string::npos) {
+        int lhs = std::stoi(trim(c.substr(0, pos)));
+        int rhs = std::stoi(trim(c.substr(pos + 1)));
+        return lhs < rhs;
+    }
+
+    return false; // fallback
 }
 
 // Parse comma-separated list items inside brackets (supports quoted strings or numbers)
@@ -60,7 +88,7 @@ void runCommand(const std::string& line) {
             std::cout << "Syntax error in io.out()\n";
             return;
         }
-        
+
         std::string content = trim(trimmed.substr(start_paren + 1, end_paren - start_paren - 1));
 
         if (content.empty()) {
@@ -91,7 +119,6 @@ void runCommand(const std::string& line) {
             size_t pos = 0;
             double num = std::stod(content, &pos);
             if (pos == content.size()) {
-                // Successfully parsed number
                 std::cout << num << std::endl;
                 return;
             }
@@ -115,6 +142,25 @@ int main() {
         std::string input = trim(line);
 
         if (input == "q" || input == "quit") break;
+
+        // Inline if support (only one-line if {...})
+        if (input.rfind("if ", 0) == 0) {
+            size_t brace_open = input.find('{');
+            size_t brace_close = input.find('}');
+
+            if (brace_open != std::string::npos && brace_close != std::string::npos && brace_close > brace_open) {
+                std::string cond = trim(input.substr(3, brace_open - 3));
+                std::string block = trim(input.substr(brace_open + 1, brace_close - brace_open - 1));
+
+                if (evalCondition(cond)) {
+                    runCommand(block);
+                }
+                continue;
+            } else {
+                std::cout << "Syntax error: if statement must have { ... } block on same line\n";
+                continue;
+            }
+        }
 
         runCommand(input);
     }
