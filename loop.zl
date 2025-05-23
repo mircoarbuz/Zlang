@@ -1,1 +1,0 @@
-if 1 < 2 { loop 9 { io.out("Hello"); } }

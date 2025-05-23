@@ -1,0 +1,2 @@
+func sleep() { io.out("z z z"); }
+sleep();
