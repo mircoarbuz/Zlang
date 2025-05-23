@@ -95,7 +95,7 @@ void runCommand(const std::string& line) {
 }
 
 int main() {
-    std::cout << "Z shell\n";
+    std::cout << "Zlang shell\n";
     std::string z_logotop = " ^";
     std::string z_logo_m = "|Z|";
     std::string z_logobottom = " v";
